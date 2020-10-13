@@ -125,9 +125,9 @@ QList<NodeID> traverseTree( IndexedPointCloud &pc, NodeID n, int maxDepth )
 void do_2d_rendering()
 {
   // quick tests: rendering 7 nodes with ~366K points:
-  // - total time with "laszip" ~630ms
-  // - total time with "binary" ~180ms
-  // - rendering itself is fast: ~12ms
+  // - total time with "laszip" ~510ms
+  // - total time with "binary" ~40ms
+  // - rendering itself is fast: ~10ms
   // - big difference in size: "laszip" ~82 MB  /  "binary" ~650 MB
   // - orig. LAZ  ~81 MB  /  equivalent LAS  ~484 MB
 
