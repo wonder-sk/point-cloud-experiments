@@ -12,6 +12,9 @@
 
 #include <QTime>
 
+void draco_test( QVector<qint32> d );
+
+
 class MyStage : public pdal::Streamable
 {
 public:
@@ -151,6 +154,10 @@ void do_2d_rendering()
   NodeID n5( 5, 14, 14, 3 );
   QVector<qint32> nodeData = pc.nodePositionDataAsInt32( n1, so, db );
 
+  // uncomment to test draco encoding/decoding
+  draco_test( nodeData );
+  return;
+
   qDebug() << pc.nodeBounds( n0 );
   qDebug() << pc.nodeBounds( n1 );
 
@@ -263,6 +270,131 @@ void simple_reading_test()
 
   end = std::chrono::system_clock::now();
   std::cout << "elapsed time: " << std::chrono::duration<double>(end - start).count() << "s\n";
+}
+
+
+#include "draco/compression/encode.h"
+#include "draco/core/cycle_timer.h"
+#include "draco/io/file_utils.h"
+#include "draco/io/mesh_io.h"
+#include "draco/io/point_cloud_io.h"
+
+#include <QFile>
+
+// this test can be enabled in do_2d_rendering()
+void draco_test( QVector<qint32> d )
+{
+  // on input we have X,Y,Z coordinates as int32 values
+
+  std::unique_ptr<draco::PointCloud> pc;
+  pc.reset(new draco::PointCloud());
+  std::unique_ptr<draco::PointAttribute> pa(new draco::PointAttribute());
+  pa->Init( draco::GeometryAttribute::POSITION, 3, draco::DT_INT32, false, d.size()/3 );
+  draco::DataBuffer *buf = pa->buffer();
+  uint8_t* raw = buf->data();
+  memcpy( raw, d.constData(), 4*d.size() );
+  pc->AddAttribute(std::move(pa));
+  pc->set_num_points(d.size()/3);
+
+  // Quantization 11  compr.level 7   -> ~30%
+  // - other quantization levels seem to give the same result (?)
+  // - other compr. levels seem to be same/similar (?)
+  // TODO: I am unable to get lossy encoding - why?
+
+  int position_quantization = 11;
+  int compression_level = 7;
+
+  draco::Encoder encoder;
+  encoder.SetAttributeQuantization(draco::GeometryAttribute::POSITION, position_quantization);
+  const int speed = 10 - compression_level;
+  encoder.SetSpeedOptions(speed, speed);
+
+  encoder.SetEncodingMethod(draco::POINT_CLOUD_KD_TREE_ENCODING);   // reordered (default)
+  //encoder.SetEncodingMethod(draco::POINT_CLOUD_SEQUENTIAL_ENCODING);  // no reordering, worse compression
+
+  draco::CycleTimer timer;
+  // Encode the geometry.
+  draco::EncoderBuffer buffer;
+  timer.Start();
+  const draco::Status status = encoder.EncodePointCloudToBuffer(*pc.get(), &buffer);
+  if (!status.ok()) {
+    printf("Failed to encode the point cloud.\n");
+    printf("%s\n", status.error_msg());
+    return;
+  }
+  timer.Stop();
+
+  QFile f("/tmp/test.draco");
+  bool res = f.open(QIODevice::WriteOnly);
+  Q_ASSERT(res);
+  f.write( buffer.data(), buffer.size() );
+  f.close();
+
+  printf("Encoded point cloud %d saved (%" PRId64 " ms to encode).\n",
+         d.size()/3, timer.GetInMs());
+  printf("\nEncoded size = %zu bytes\n\n", buffer.size());
+
+  ////
+  /// decode
+  ///
+
+  draco::DecoderBuffer buffer2;
+  buffer2.Init(buffer.data(), buffer.size());
+
+  timer.Start();
+  draco::Decoder decoder;
+  auto statusor = decoder.DecodePointCloudFromBuffer(&buffer2);
+  if (!statusor.ok()) {
+    return;
+  }
+  std::unique_ptr<draco::PointCloud> pc2;
+  pc2 = std::move(statusor).value();
+  timer.Stop();
+
+  std::cout << "points " << pc2->num_points() << "  attrs: " << pc2->NumNamedAttributes(draco::GeometryAttribute::POSITION) << std::endl;
+  const draco::PointAttribute *pa2 = pc2->GetNamedAttribute(draco::GeometryAttribute::POSITION);
+  std::cout << "attr size " << pa2->size() << std::endl;
+  qint32* d2 = (qint32*) pa2->buffer()->data();
+
+#if 0
+  // the in/out values are not going to match because points are re-ordered
+  std::cout << "in  data: " << d[0] << " " << d[1] << " " << d[2] << std::endl;
+  std::cout << "out data: " << d2[0] << " " << d2[1] << " " << d2[2] << std::endl;
+  std::cout << "in  data: " << d[3] << " " << d[4] << " " << d[5] << std::endl;
+  std::cout << "out data: " << d2[3] << " " << d2[4] << " " << d2[5] << std::endl;
+
+  int last = d.size()/3 - 1;
+  std::cout << "in  data: " << d[3*last] << " " << d[3*last+1] << " " << d[3*last+2] << std::endl;
+  std::cout << "out data: " << d2[3*last] << " " << d2[3*last+1] << " " << d2[3*last+2] << std::endl;
+#endif
+
+  printf("Decoded geometry saved  (%" PRId64 " ms to decode)\n", timer.GetInMs());
+
+  float per_point = buffer.size() / float(d.size()/3);
+  printf("data per point: %f bytes\n", per_point );
+  printf("compression to %f%% of original size\n", per_point/12.f * 100);
+
+  // just a check if the encoding is lossy...?
+  qint64 total_d = 0, total_d2 = 0;
+  for ( int i = 0; i < d.count(); ++i )
+  {
+      total_d += abs(d[i]);
+      total_d2 += abs(d2[i]);
+  }
+  std::cout << "sum d1/d2 " << total_d << " -- " << total_d2 << std::endl;
+
+  // just to see what we had on encoder's input and what we decoded
+  QFile f1("/tmp/draco.in");
+  f1.open(QIODevice::WriteOnly);
+  QFile f2("/tmp/draco.out");
+  f2.open(QIODevice::WriteOnly);
+  for (int i = 0; i < d.size()/3; ++i)
+  {
+    QString s1 = QString("%1 %2 %3\n").arg(d[3*i]).arg(d[3*i+1]).arg(d[3*i+2]);
+    f1.write(s1.toLatin1());
+    QString s2 = QString("%1 %2 %3\n").arg(d2[3*i]).arg(d2[3*i+1]).arg(d2[3*i+2]);
+    f2.write(s2.toLatin1());
+  }
 }
 
 

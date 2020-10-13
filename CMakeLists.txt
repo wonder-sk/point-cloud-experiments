@@ -26,6 +26,15 @@ add_executable(pdal-reader
   pointcloudrenderer.cpp
 )
 
-include_directories(${PDAL_INCLUDE_DIRS} /home/martin/inst/LASzip-inst/include)
-target_link_libraries(pdal-reader ${PDAL_LIBRARIES}  Qt5::Core Qt5::Gui)
+include_directories(
+    ${PDAL_INCLUDE_DIRS}
+    /home/martin/inst/LASzip-inst/include
+    /home/martin/inst/draco/src
+    /home/martin/inst/draco/build
+)
+target_link_libraries(pdal-reader
+    ${PDAL_LIBRARIES}
+    Qt5::Core Qt5::Gui
+    /home/martin/inst/draco/build/libdraco.a
+)
 
