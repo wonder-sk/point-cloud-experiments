@@ -155,8 +155,8 @@ void do_2d_rendering()
   QVector<qint32> nodeData = pc.nodePositionDataAsInt32( n1, so, db );
 
   // uncomment to test draco encoding/decoding
-  draco_test( nodeData );
-  return;
+  //draco_test( nodeData );
+  //return;
 
   qDebug() << pc.nodeBounds( n0 );
   qDebug() << pc.nodeBounds( n1 );
