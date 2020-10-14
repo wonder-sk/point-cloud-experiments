@@ -31,11 +31,9 @@ bool IndexedPointCloud::load(const QString &directory)
     if ( err.error != QJsonParseError::NoError )
       return false;
 
-    QString dataType = doc["dataType"].toString();  // "binary" or "laszip"
-    if ( dataType != "laszip" && dataType != "binary" )
+    mDataType = doc["dataType"].toString();  // "binary" or "laszip"
+    if ( mDataType != "laszip" && mDataType != "binary" && mDataType != "zstandard" )
       return false;
-
-    mLaszip = (dataType == "laszip");
 
     QString hierarchyType = doc["hierarchyType"].toString();  // "json" or "gzip"
     if ( hierarchyType != "json" )
@@ -198,7 +196,35 @@ public:
   ScaleOffset so;
 };
 
+#include <zstd.h>
 
+QByteArray decompressZtdStream( const QByteArray &dataCompressed )
+{
+  // NOTE: this is very primitive implementation because we expect the uncompressed
+  // data will be always less than 10 MB
+
+  const int MAXSIZE=10000000;
+  QByteArray dataUncompressed;
+  dataUncompressed.resize( MAXSIZE );
+
+  ZSTD_DStream *strm = ZSTD_createDStream();
+  ZSTD_initDStream(strm);
+
+  ZSTD_inBuffer m_inBuf;
+  m_inBuf.src = reinterpret_cast<const void *>(dataCompressed.constData());
+  m_inBuf.size = dataCompressed.size();
+  m_inBuf.pos = 0;
+
+  ZSTD_outBuffer outBuf { reinterpret_cast<void *>(dataUncompressed.data()), MAXSIZE, 0 };
+  size_t ret = ZSTD_decompressStream(strm, &outBuf, &m_inBuf);
+  Q_ASSERT (!ZSTD_isError(ret));
+  Q_ASSERT( outBuf.pos );
+  Q_ASSERT( outBuf.pos < outBuf.size );
+
+  ZSTD_freeDStream(strm);
+  dataUncompressed.resize(outBuf.pos);
+  return dataUncompressed;
+}
 
 QVector<qint32> IndexedPointCloud::nodePositionDataAsInt32(const NodeID &n, ScaleOffset &so, DataBounds &db)
 {
@@ -206,8 +232,7 @@ QVector<qint32> IndexedPointCloud::nodePositionDataAsInt32(const NodeID &n, Scal
   int count = mHierarchy[n];
   //qDebug() << "count" << count;
 
-
-  if ( !mLaszip )
+  if ( mDataType == "binary" )
   {
     QString filename = QString( "%1/ept-data/%2.bin" ).arg( mDirectory ).arg( n.toString() );
     Q_ASSERT( QFile::exists( filename ) );
@@ -240,7 +265,44 @@ QVector<qint32> IndexedPointCloud::nodePositionDataAsInt32(const NodeID &n, Scal
     }
     return data;
   }
+  if ( mDataType == "zstandard" )
+  {
+    QString filename = QString( "%1/ept-data/%2.zst" ).arg( mDirectory ).arg( n.toString() );
+    Q_ASSERT( QFile::exists( filename ) );
 
+    QFile f( filename );
+    bool r = f.open(QIODevice::ReadOnly);
+    Q_ASSERT(r);
+
+    QByteArray dataCompressed = f.readAll();
+    QByteArray dataUncompressed = decompressZtdStream( dataCompressed );
+
+    // from here it's the same as "binary"
+
+    // WHY??? per-record should be 18 based on schema, not 46
+    int stride = 46; //18;
+    int count = dataUncompressed.size() / stride;
+    db.xmax = db.ymax = db.zmax = -999999999;
+    db.xmin = db.ymin = db.zmin =  999999999;
+    QVector<qint32> data( count * 3 );
+    const char *ptr = dataUncompressed.constData();
+    for ( int i = 0; i < count; ++i )
+    {
+      // WHY??? X,Y,Z are int32 values stored as doubles
+      double *bytesD = (double*) (ptr+stride*i);
+      data[i*3+0] = (bytesD[0]);
+      data[i*3+1] = (bytesD[1]);
+      data[i*3+2] = (bytesD[2]);
+
+      db.xmin = min( db.xmin, data[i*3+0]);
+      db.xmax = max( db.xmax, data[i*3+0]);
+      db.ymin = min( db.ymin, data[i*3+1]);
+      db.ymax = max( db.ymax, data[i*3+1]);
+      db.zmin = min( db.zmin, data[i*3+2]);
+      db.zmax = max( db.zmax, data[i*3+2]);
+    }
+    return data;
+  }
 
   QString filename = QString( "%1/ept-data/%2.laz" ).arg( mDirectory ).arg( n.toString() );
   Q_ASSERT( QFile::exists( filename ) );

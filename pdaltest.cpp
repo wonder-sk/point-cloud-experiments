@@ -137,6 +137,7 @@ void do_2d_rendering()
   IndexedPointCloud pc;
   //bool res = pc.load("/home/martin/tmp/las/entwine_26850-bin");  // test using "binary" encoding
   bool res = pc.load("/home/martin/tmp/las/entwine_26850");   // test using "laszip" encoding
+  //bool res = pc.load("/home/martin/tmp/las/entwine_26850-zstd");   // test using "zstandard" encoding
   Q_ASSERT( res );
 
   QList<NodeID> lvl1 = pc.children( NodeID(0,0,0,0) );

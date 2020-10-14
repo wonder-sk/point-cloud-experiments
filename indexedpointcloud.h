@@ -85,7 +85,7 @@ public:
 
 private:
   QString mDirectory;
-  bool mLaszip = false;
+  QString mDataType;
   QHash<NodeID, int> mHierarchy;
   ScaleOffset mScaleOffset;  //!< scale and offset of our int32 coordinates compared to CRS coords
   DataBounds mRootBounds;  //!< bounds of the root node's cube (in int32 coordinates)

@@ -36,5 +36,6 @@ target_link_libraries(pdal-reader
     ${PDAL_LIBRARIES}
     Qt5::Core Qt5::Gui
     /home/martin/inst/draco/build/libdraco.a
+    /usr/lib/x86_64-linux-gnu/libzstd.a
 )
 
